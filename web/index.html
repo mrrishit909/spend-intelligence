@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Procurement &amp; Spend Intelligence</title>
+<link rel="stylesheet" href="kit.css">
+</head>
+<body>
+<header class="top">
+  <h1>Procurement &amp; Spend Intelligence</h1>
+  <span class="sub">An invented company's accounts payable: one year, three source systems, 41,000 invoices. Where is the money leaking?</span>
+  <span class="mode">…</span>
+  <button class="primary" id="runall">Run all steps</button>
+</header>
+<main>
+  <nav class="steps"></nav>
+  <div>
+    <div id="steps"></div>
+    <section class="step" id="roi"><div class="head"><div class="grow"><h2>What is it worth?</h2>
+      <p>Findings come from the run above (run step 6 first). Recovery rates are assumptions: change them.</p></div></div>
+      <div class="out"><div class="card roi" id="roibox"><span class="mute">Run step 6 to load the figures.</span></div></div></section>
+  </div>
+</main>
+<footer>Every vendor, invoice and contract is synthetic, and the leakage was planted. Real ledgers are messier than this one.</footer>
+<script src="kit.js"></script>
+<script>
+const M = x => x == null ? '–' : (Math.abs(x) >= 1e6 ? fmt.usd(x / 1e6, 2) + 'M' : Math.abs(x) >= 1e4 ? fmt.usd(x / 1e3, 0) + 'k' : fmt.usd(x, 0));
+const kind = k => ({ rate_above_contract: 'Billed above the contract rate', missed_rebate: 'Volume rebate earned, not credited', duplicate_payment: 'Paid twice', recover_duplicate_payments: 'Recover duplicate payments',
+  recover_overbilling: 'Recover overbilling', claim_missed_rebate: 'Claim missed rebates', consolidate_vendors: 'Consolidate vendors' }[k] || k);
+const R = {
+  imp: j => { const s = j.result; return kpis([{ label: 'Spend imported', value: M(s.spend), sub: fmt.date(s.period[0]) + ' to ' + fmt.date(s.period[1]) }, { label: 'Invoices', value: fmt.n(s.invoices), sub: fmt.n(s.invoice_lines) + ' lines' },
+      { label: 'Vendor records', value: fmt.n(s.vendor_records), sub: 'across ' + s.source_systems + ' source systems' }, { label: 'Purchase orders', value: fmt.n(s.purchase_orders) }, { label: 'Contracts', value: s.contracts, sub: 'not yet read' },
+      { label: 'Lines with no category', value: fmt.n(s.uncategorized_lines), sub: fmt.pct(s.uncategorized_lines / s.invoice_lines) + ' of lines' }]); },
+  res: r => kpis([{ label: 'Vendor records', value: fmt.n(r.vendor_records) }, { label: 'Actual companies', value: fmt.n(r.canonical_vendors) }, { label: 'Duplicate records folded in', value: fmt.n(r.records_merged_away), sub: fmt.pct(r.records_merged_away / r.vendor_records) + ' of the vendor master' },
+      { label: 'Left for a person', value: r.needs_review.length, sub: 'pairs the model is unsure about' }]),
+  cloud: c => card(`${c.name}: ${c.aliases.length} records in three systems are one company · ${M(c.spend)} a year`, table([{ k: 'raw_name', label: 'Name as typed', f: v => `<span class="mono">${esc(v).replace(/ /g, '&nbsp;')}</span>` }, { k: 'source_system', label: 'System' },
+      { k: 'match_confidence', label: 'Match confidence', num: 1, f: v => fmt.pct(v, 1) }], c.aliases)),
+  cls: j => { const s = j.result; return kpis([{ label: 'Lines classified', value: fmt.n(s.classified), sub: fmt.pct(s.share_of_lines) + ' of all lines' }, { label: 'Spend now categorized', value: M(s.amount), sub: fmt.pct(s.share_of_spend) + ' of spend' },
+      { label: 'Mean confidence', value: fmt.pct(s.mean_confidence, 1) }, { label: 'Low confidence', value: fmt.n(s.low_confidence), sub: 'flagged for a person' }])
+    + card('Examples', table([{ k: 'description', label: 'Line description', f: v => `<span class="mono">${esc(v)}</span>` }, { k: 'category', label: 'Category' }, { k: 'confidence', label: 'Confidence', num: 1, f: v => fmt.pct(v) }], s.examples)); },
+  cube: c => { const qs = [...new Set(c.cells.map(x => x.col))].sort(); return card(`Spend cube: ${c.rows.replace('_', ' ')} by ${c.cols} · ${M(c.total)}`, table([{ k: 'key', label: 'Category' }, ...qs.map(q => ({ k: q, label: q, num: 1, f: v => M(v) })), { k: 'amount', label: 'Total', num: 1, f: v => `<b>${M(v)}</b>` }],
+      c.row_totals.map(r => ({ ...r, ...Object.fromEntries(qs.map(q => [q, (c.cells.find(x => x.row === r.key && x.col === q) || {}).amount])) })))); },
+  dup: d => { const t = d.top[0]; return kpis([{ label: 'Duplicate payments', value: d.pairs, sub: M(d.amount) }, { label: 'Entered under another spelling', value: d.entered_under_another_spelling, sub: 'invisible before the vendors were merged' },
+      { label: 'A same-record, same-number check finds', value: d.baseline.pairs, sub: M(d.baseline.amount) }])
+    + card(`Largest: ${t.vendor} · ${M(t.amount)} paid twice, ${t.days_apart} days apart`, table([{ k: 'which', label: '' }, { k: 'invoice_number', label: 'Invoice number', f: v => `<span class="mono">${esc(v)}</span>` }, { k: 'invoice_date', label: 'Date' }, { k: 'raw_name', label: 'Vendor as typed' }, { k: 'source_system', label: 'System' }],
+        [{ which: 'original', ...t.original_invoice }, { which: 'duplicate', ...t.duplicate_invoice }]) + `<div class="small mute" style="margin-top:6px">${esc(t.evidence)}</div>`); },
+  ext: e => card(`${e.title}: terms read by ${e.extractor}`, `<div class="grid2"><pre class="doc" style="font-size:11.5px">${esc(e.document)}</pre><div>${table([{ k: 'citation_anchor', label: 'Clause', f: v => `<span class="mono">${esc(v)}</span>` }, { k: 'key', label: 'Term', f: v => esc(v.replace(/_/g, ' ')) },
+      { k: 'value', label: 'Value', num: 1, f: (v, r) => r.term_type === 'rate_card' ? fmt.usd(v, 2) + '/h' : esc(v) }], e.terms)}</div></div>`),
+  scan: j => `<div class="small mute" style="margin-bottom:10px">Job ${esc(j.status)}: ${j.result.contracts_read} contracts read, ${fmt.n(j.result.terms_extracted)} terms extracted, every invoice line checked.</div>`,
+  leak: l => kpis([{ label: 'Leakage found', value: `<span style="color:var(--bad)">${M(l.total)}</span>`, sub: 'over ' + l.period_months + ' months' }, { label: 'Annualized', value: M(l.annualized) }, { label: 'Share of spend', value: fmt.pct(l.share_of_spend, 2), sub: 'of ' + M(l.spend) }])
+    + `<div class="grid2">${card('By kind', barChart(l.by_kind.map((k, i) => ({ label: kind(k.kind), value: +k.amount, color: PALETTE[[3, 2, 4][i % 3]], note: fmt.n(k.findings) + ' findings' })), { fmt: M }))}
+       ${card('Vendors billing above their rate card', table([{ k: 'vendor', label: 'Vendor' }, { k: 'findings', label: 'Lines', num: 1 }, { k: 'amount', label: 'Overbilled', num: 1, f: v => M(+v) }], l.top_rate_vendors))}</div>`
+    + card('Largest findings, each tied to a contract clause', table([{ k: 'vendor', label: 'Vendor' }, { k: 'detail', label: 'What happened' }, { k: 'citation_anchor', label: 'Clause', f: (v, r) => `<span class="mono">${esc(v)}</span><br><span class="mute small">${esc(r.quote.slice(0, 70))}…</span>` },
+        { k: 'variance', label: 'Amount', num: 1, f: v => M(+v) }], l.top_findings.slice(0, 5))),
+  opp: o => { const c = o.consolidation, ev = c.evidence; return card(c.title, kpis([{ label: 'Spend across the six', value: M(ev.vendors.reduce((s, v) => s + v.spend, 0)) }, { label: 'Spend that would move', value: M(ev.spend_moved), sub: 'the four smallest' },
+      { label: 'Estimated saving', value: M(+c.estimated_savings), sub: fmt.pct(ev.assumed_saving_rate) + ' of moved spend (assumption)' }, { label: 'Effort', value: c.effort }]) + barChart(ev.vendors.map((v, i) => ({ label: v.name, value: v.spend, color: i < 2 ? PALETTE[1] : PALETTE[2], note: i < 2 ? 'keep' : 'move' })), { fmt: M }))
+    + card(`Ranked opportunities · ${o.scoring}`, table([{ k: 'title', label: 'Opportunity' }, { k: 'effort', label: 'Effort', f: v => badge(v, v === 'low' ? 'good' : 'warn') }, { k: 'estimated_savings', label: 'Savings', num: 1, f: v => M(+v) }, { k: 'score', label: 'Score', num: 1, f: v => fmt.n(v / 1000, 0) }], o.items.slice(0, 7))); },
+  dos: d => card(`Negotiation dossier: ${d.name}`, kpis([{ label: 'Spend, 12 months', value: M(d.spend) }, { label: 'Records merged', value: d.aliases.length }, { label: 'Overbilled', value: M(d.leakage.reduce((s, x) => s + +x.amount, 0)), sub: d.leakage.reduce((s, x) => s + x.findings, 0) + ' lines' },
+      { label: 'Contract ends', value: fmt.date((d.contract_terms.find(t => t.end_date) || {}).end_date) }]) + `<ul style="margin:0 0 12px 18px;padding:0">${d.talking_points.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`
+    + `<div class="grid2"><div>${table([{ k: 'role', label: 'Role' }, { k: 'contract_rate', label: 'Contract', num: 1, f: v => fmt.usd(v, 2) }, { k: 'avg_billed', label: 'Avg billed', num: 1, f: v => fmt.usd(v, 2) },
+        { k: 'max_billed', label: 'Highest billed', num: 1, f: (v, r) => `<span style="color:${+v > +r.contract_rate ? 'var(--bad)' : 'inherit'}">${fmt.usd(v, 2)}</span>` }, { k: 'hours', label: 'Hours', num: 1, f: v => fmt.n(v) }], d.rate_card_vs_billed)}</div>
+      <div>${table([{ k: 'vendor', label: 'Alternatives already in use' }, { k: 'spend', label: 'Spend', num: 1, f: v => M(+v) }], d.alternatives)}</div></div>`),
+  _step6: r => { const o = r.opp; return card(`Savings pipeline for the CFO · ${M(o.pipeline_total)} across ${o.count} opportunities`, barChart(o.pipeline.map((p, i) => ({ label: kind(p.opportunity_type), value: +p.savings, color: PALETTE[i % 6], note: p.n + (p.n > 1 ? ' vendors' : '') })), { fmt: M })); },
+  audit: a => card(`Audit log · hash chain ${a.chain_valid ? 'verifies' : 'BROKEN'}`, table([{ k: 'at', label: 'When', f: fmt.time }, { k: 'action', label: 'Action', f: v => `<span class="mono">${esc(v)}</span>` },
+    { k: 'detail', label: 'Detail', f: d => `<span class="small">${esc(Object.entries(d).filter(([, v]) => typeof v !== 'object').map(([k, v]) => `${k}: ${v}`).join(' · ').slice(0, 130))}</span>` }], a.events.slice().reverse())),
+  _after: (i, r) => { if (i === 5) roi(r); },
+};
+function roi(r) {
+  const p = Object.fromEntries(r.opp.pipeline.map(x => [x.opportunity_type, +x.savings])), box = document.querySelector('#roibox');
+  box.innerHTML = `<div class="grid2"><div>
+    <label>Duplicate payments found, $ <input type="number" id="r_d" value="${Math.round(p.recover_duplicate_payments || 0)}"></label>
+    <label>Overbilling found, $ <input type="number" id="r_o" value="${Math.round(p.recover_overbilling || 0)}"></label>
+    <label>Missed rebates found, $ <input type="number" id="r_r" value="${Math.round(p.claim_missed_rebate || 0)}"></label>
+    <label>Share actually recovered, % (assumption) <input type="number" id="r_s" value="60"></label>
+    <label>Subscription cost per year, $ (assumption) <input type="number" id="r_c" value="180000"></label></div><div id="r_out"></div></div>`;
+  const calc = () => { const g = id => +document.querySelector(id).value, got = (g('#r_d') + g('#r_o') + g('#r_r')) * g('#r_s') / 100;
+    document.querySelector('#r_out').innerHTML = kpis([{ label: 'Recovered in year one', value: M(got) }, { label: 'Net of subscription', value: M(got - g('#r_c')) }, { label: 'Return', value: fmt.n(got / Math.max(1, g('#r_c')), 1) + '×' }])
+      + '<div class="small mute">The leakage here was planted at about 1.1% of spend. What a real ledger holds is unknown until it is run.</div>'; };
+  box.oninput = calc; calc();
+}
+const demo = new Demo(R); demo.init();
+</script>
+</body>
+</html>

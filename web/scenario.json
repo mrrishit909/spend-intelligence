@@ -1,0 +1,148 @@
+{
+ "service": "spend-intelligence",
+ "run": "demo-1",
+ "tokens": {
+  "procurement": "acme-procurement-demo",
+  "analyst": "acme-analyst-demo",
+  "admin": "acme-admin-demo"
+ },
+ "steps": [
+  {
+   "title": "Import one year of AP data",
+   "say": "A year of invoices arrives from three source systems (ERP, accounts payable, purchasing cards), each with its own vendor list. Nothing has been cleaned yet.",
+   "calls": [
+    {
+     "key": "imp",
+     "as": "procurement",
+     "method": "POST",
+     "path": "/v1/imports",
+     "body": {
+      "source": "erp-extract",
+      "fiscal_year": "latest"
+     }
+    }
+   ]
+  },
+  {
+   "title": "Merge four spellings into one vendor",
+   "say": "The same supplier was typed differently in each system. Entity resolution compares names, tax ids, bank accounts and addresses and decides which records are one company.",
+   "calls": [
+    {
+     "key": "res",
+     "as": "procurement",
+     "method": "POST",
+     "path": "/v1/vendors:resolve",
+     "body": {}
+    },
+    {
+     "key": "cloudv",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/vendors?q=Wren+Cloud+Services"
+    },
+    {
+     "key": "cloud",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/vendors/{{cloudv.items.0.id}}/dossier"
+    }
+   ]
+  },
+  {
+   "title": "Classify uncategorized spend",
+   "say": "A quarter of invoice lines came with no category. A classifier reads each line's description and files it in the spend taxonomy, with a confidence.",
+   "calls": [
+    {
+     "key": "cls",
+     "as": "procurement",
+     "method": "POST",
+     "path": "/v1/spend:classify"
+    },
+    {
+     "key": "cube",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/spend/cube?rows=parent_category&cols=quarter"
+    }
+   ]
+  },
+  {
+   "title": "A duplicate invoice, and an hourly rate above contract",
+   "say": "Duplicates hide behind a changed invoice number and a different spelling of the vendor. Separately, a consulting firm's contract is read for its rate card, with the clause each rate came from.",
+   "calls": [
+    {
+     "key": "dup",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/invoices/duplicates?limit=5"
+    },
+    {
+     "key": "firm",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/vendors?q=Orchard+Advisory"
+    },
+    {
+     "key": "ks",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/contracts?vendor_id={{firm.items.0.id}}"
+    },
+    {
+     "key": "ext",
+     "as": "procurement",
+     "method": "POST",
+     "path": "/v1/contracts/{{ks.items.0.id}}:extract"
+    },
+    {
+     "key": "scan",
+     "as": "procurement",
+     "method": "POST",
+     "path": "/v1/leakage:scan"
+    }
+   ]
+  },
+  {
+   "title": "Annualized leakage",
+   "say": "Every contract is read and every invoice line checked against it: hours billed above the rate card, volume rebates earned but never credited, and payments made twice.",
+   "calls": [
+    {
+     "key": "leak",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/leakage"
+    }
+   ]
+  },
+  {
+   "title": "Six overlapping software vendors",
+   "say": "Six suppliers sell much the same collaboration software to different teams. Moving the smaller four onto the two largest is a consolidation opportunity, ranked alongside the money simply owed back.",
+   "calls": [
+    {
+     "key": "opp",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/opportunities"
+    }
+   ]
+  },
+  {
+   "title": "Negotiation dossier and the savings pipeline",
+   "say": "Everything known about the consulting firm on one page for the renewal conversation, and the pipeline total for the CFO.",
+   "calls": [
+    {
+     "key": "dos",
+     "as": "analyst",
+     "method": "GET",
+     "path": "/v1/vendors/{{firm.items.0.id}}/dossier"
+    },
+    {
+     "key": "audit",
+     "as": "admin",
+     "method": "GET",
+     "path": "/v1/audit?limit=8"
+    }
+   ]
+  }
+ ]
+}
